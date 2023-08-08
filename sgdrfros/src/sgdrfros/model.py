@@ -260,7 +260,7 @@ class SGDRF(pyro.contrib.gp.Parameterized):
         if (self.subsample_type == "full") or (t <= n):
             return torch.tensor(list(range(t + 1)), dtype=torch.long)
 
-        rtp1 = torch.arange(t + 1, device=self.device)
+        rtp1 = torch.arange(t + 1, device=self.device).type(torch.float)
         latest = normalize(
             torch.tensor(
                 data=[0 for _ in range(t)]
@@ -268,36 +268,41 @@ class SGDRF(pyro.contrib.gp.Parameterized):
                     1,
                 ],
                 device=self.device,
+                dtype=torch.float
             ),
             p=1.0,
+            dim=0
         )
         exponential = normalize(
-            torch.exp(-(t - rtp1) * self.subsample_params["exponential"]), p=1.0
+            torch.exp(-(t - rtp1) * self.subsample_params["exponential"]), p=1.0, dim=0
         )
-        uniform = normalize(0 * rtp1 + 1, p=1.0)
-        if t < 1 or self.subsample_type == "latest":
+        uniform = normalize(0.0 * rtp1 + 1.0, p=1.0, dim=0)
+        if t < 1 or self.subsample_type == SubsampleType.latest:
             probs = latest
-        elif self.subsample_type == "exponential":
+        elif self.subsample_type == SubsampleType.exponential:
             probs = exponential
-        elif self.subsample_type == "uniform":
+        elif self.subsample_type == SubsampleType.uniform:
             probs = uniform
-        elif self.subsample_type == "exponential+uniform":
+        elif self.subsample_type == SubsampleType.exponential_plus_uniform:
             probs = normalize(
                 exponential * self.subsample_params["weight"]
                 + uniform * (1.0 - self.subsample_params["weight"]),
-                p=1.0,
+                p=1.0, 
+                dim=0
             )
-        elif self.subsample_type == "exponential+latest":
+        elif self.subsample_type == SubsampleType.exponential_plus_latest:
             probs = normalize(
                 exponential * self.subsample_params["weight"]
                 + latest * (1.0 - self.subsample_params["weight"]),
                 p=1.0,
+                dim=0
             )
-        elif self.subsample_type == "uniform+latest":
+        elif self.subsample_type == SubsampleType.uniform_plus_latest:
             probs = normalize(
                 uniform * self.subsample_params["weight"]
                 + latest * (1.0 - self.subsample_params["weight"]),
                 p=1.0,
+                dim=0
             )
         else:
             raise ValueError(f'invalid subsample_type "{self.subsample_type}"')

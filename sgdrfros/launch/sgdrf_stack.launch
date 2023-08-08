@@ -1,0 +1,27 @@
+<launch>
+    <include file="$(find sgdrfros)/launch/sgdrfros.launch"/>
+    <arg name="triton_server_url" default="127.0.0.1:8001" />
+    <arg name="classifier_model" default="ifcb_classifier" />
+    <arg name="topic" value="/ifcb" />
+    <node pkg="triton_image_classifier" type="classifier" name="classifier">
+        <param name="~triton_server_url" value="$(arg triton_server_url)" />
+        <param name="~classifier_model" value="$(arg classifier_model)" />
+        <param name="~topic" value="$(arg topic)" />
+    </node>
+    <arg name="ifcb_dataset" default="radbot" />
+    <arg name="ifcb_dashboard_url" default="https://habon-ifcb.whoi.edu" />
+    <arg name="gps_fix_topic" default="/gps/fix" />
+    <node pkg="fake_ifcb" type="node.py" name="fake_ifcb">
+        <param name="~ifcb_dataset" value="$(arg ifcb_dataset)" />
+        <param name="~ifcb_dashboard_url" value="$(arg ifcb_dashboard_url)" />
+        <param name="~topic" value="$(arg topic)" />
+        <param name="~gps_fix_topic" value="$(arg gps_fix_topic)" />
+    </node>
+    <arg name="num_words" default="21" />
+    <arg name="classlist_file" default = "/workspaces/ros_ws/models_onnx/ifcb_classifier/ifcb_classifier.classes"/>
+    <node pkg="ifcb_triton_glue" type="node.py" name="ifcb_triton_glue">
+        <param name="~topic" value="$(arg topic)" />
+        <param name="~classlist_file" value="$(arg classlist_file)" />
+        <param name="~num_words" value="$(arg num_words)" />
+    </node>
+</launch>

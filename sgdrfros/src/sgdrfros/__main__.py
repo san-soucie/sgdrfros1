@@ -29,10 +29,11 @@ RANGETYPE = Tuple[Union[int, float], Union[int, float], Union[int, float]]
 
 class SGDRFNode:
     def __init__(self):
-        rospy.init_node()
+        rospy.init_node('sgdrf')
         self.parser = argparse.ArgumentParser()
         self.setup_parameters()
         self.sgdrf = self.initialize_sgdrf()
+        rospy.set_param('~num_words', self.sgdrf.V)
         self.obs_subscriber = rospy.Subscriber(
             f"categorical_observation__{self.sgdrf.V}__",
             CategoricalObservation,
@@ -50,28 +51,32 @@ class SGDRFNode:
             WordTopicMatrix,
             self.word_topic_matrix_service_callback,
         )
-
-    def spin(self, rate: int = 10):
-        sleep_rate = rospy.Rate(rate)
-        while not rospy.is_shutdown():
-            self.training_step_callback()
-            rate.sleep()
-
-    def param_name(self, name: str) -> str:
-        return ".".join([rospy.get_name(), name])
-
-    def param(self, name: str) -> str:
-        return rospy.get_param(self.param_name(name))
-
-    def init_random_seed(self):
         random_seed = self.param("random_seed")
         pyro.util.set_rng_seed(random_seed)
+        self.training_timer = rospy.Timer(rospy.Duration(0.5), self.training_step_callback)
+    
+    def spin(self):
+        rospy.spin()
+        self.training_timer.shutdown()
+
+
+    def param_name(self, param: str):
+        return '/'.join([rospy.get_name(), param])
+    
+    def param(self, param: str, default: Optional[Any] = None):
+        return rospy.get_param(self.param_name(param), default=default)
 
     def initialize_sgdrf(self):
         dims = self.param("dims")
         xu_ns = self.param("xu_ns")
         d_mins = self.param("d_mins")
         d_maxs = self.param("d_maxs")
+        if isinstance(d_mins, float):
+            d_mins = [d_mins]
+        if isinstance(d_maxs, float):
+            d_maxs = [d_maxs]
+        if len(d_mins) == 1:
+            d_mins = d_mins * dims
         if len(d_maxs) == 1:
             d_maxs = d_maxs * dims
 
@@ -119,8 +124,8 @@ class SGDRFNode:
         num_particles = self.param("num_particles")
         jit = self.param("jit")
         subsample_params = {
-            "subsample_weight": subsample_weight,
-            "subsample_exp": subsample_exp,
+            "weight": subsample_weight,
+            "exponential": subsample_exp,
         }
         sgdrf = SGDRF(
             xu_ns=xu_ns,
@@ -148,18 +153,16 @@ class SGDRFNode:
         return sgdrf
 
     def categorical_observation_to_tensors(self, msg: CategoricalObservation):
-        pose_stamped = msg.pose_stamped
+        point = msg.point
         obs = msg.obs
         assert (
             len(obs) == self.sgdrf.V
         ), "message observation length does not match SGDRF initialized vocabulary size"
-        pose = pose_stamped.pose
-        point = pose.position
         x_raw = [point.x]
         if self.sgdrf.dims >= 2:
-            x_raw.append([point.y])
+            x_raw.append(point.y)
         if self.sgdrf.dims == 3:
-            x_raw.append([point.z])
+            x_raw.append(point.z)
         xs = torch.tensor(x_raw, dtype=torch.float, device=self.sgdrf.device).unsqueeze(
             0
         )
@@ -170,7 +173,7 @@ class SGDRFNode:
         xs, ws = self.categorical_observation_to_tensors(msg)
         self.sgdrf.process_inputs(xs, ws)
 
-    def training_step_callback(self):
+    def training_step_callback(self, event):
         if self.sgdrf.n_xs > 0:
             loss = self.sgdrf.step()
 
@@ -214,13 +217,15 @@ class SGDRFNode:
     def generate_parameter(self, **kwargs):
         param_name = self.param_name(kwargs["name"])
         arg_name = "--" + kwargs["name"].replace("_", "-")
-        kwargs["default"] = rospy.get_param(param_name, default=kwargs["default"])
-        kwargs["name"] = arg_name
-        self.parser.add_argument(**kwargs)
+        kwargs["default"] = rospy.get_param(param_name, default=kwargs.pop('value', None))
+        kwargs["help"] = kwargs.pop("description", "")
+        kwargs.pop('name')
+        self.parser.add_argument(arg_name, **kwargs)
 
     def setup_parameters(self):
         self.generate_parameters()
-        args = vars(self.parser.parse_args())
+        parsed_args = self.parser.parse_args(args=rospy.myargv(argv=sys.argv)[1:])
+        args = vars(parsed_args)
         for k, v in args.items():
             rospy.set_param(self.param_name(k), v)
 
@@ -343,11 +348,13 @@ class SGDRFNode:
         )
         self.generate_parameter(
             name="whiten",
+            value=False,
             action="store_true",
             description="whether or not the GP inputs are whitened",
         )
         self.generate_parameter(
             name="fail_on_nan_loss",
+            value=False,
             action="store_true",
             description="whether or not to fail if a NaN loss is encountered",
         )
@@ -359,6 +366,7 @@ class SGDRFNode:
         )
         self.generate_parameter(
             name="jit",
+            value=False,
             action="store_true",
             description="whether or not to JIT compile the prior and approximate posterior",
         )

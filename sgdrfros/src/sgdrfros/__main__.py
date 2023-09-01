@@ -30,34 +30,51 @@ RANGETYPE = Tuple[Union[int, float], Union[int, float], Union[int, float]]
 class SGDRFNode:
     def __init__(self):
         rospy.init_node('sgdrf')
+        rospy.loginfo('Starting node %s', rospy.get_name())
         self.parser = argparse.ArgumentParser()
         self.setup_parameters()
+        rospy.loginfo('Successfully set up parameters')
         self.sgdrf = self.initialize_sgdrf()
+        rospy.logdebug('Successfully set up sgdrf object')
         rospy.set_param('~num_words', self.sgdrf.V)
+        rospy.logdebug('Using vocabulary of size %d for SGDRF model', self.sgdrf.V)
         self.obs_subscriber = rospy.Subscriber(
             f"categorical_observation__{self.sgdrf.V}__",
             CategoricalObservation,
             self.new_obs_callback,
         )
+        rospy.logdebug('Set up subscriber to topic "categorical_observation__%d__"', self.sgdrf.V)
         self.loss_publisher = rospy.Publisher("loss", Float64, queue_size=10)
+        rospy.logdebug('Set up publisher for training loss')
         self.topic_prob_server = rospy.Service(
             "topic_prob", TopicProb, "topic_prob", self.topic_prob_service_callback
         )
+        rospy.logdebug('Set up service for topic probabilities at %s', self.topic_prob_server.resolved_name)
         self.word_prob_server = rospy.Service(
             "word_prob", WordProb, self.word_prob_service_callback
         )
+        rospy.logdebug('Set up service for word probabilities at %s', self.word_prob_server.resolved_name)
         self.word_topic_matrix_server = rospy.Service(
             "word_topic_matrix",
             WordTopicMatrix,
             self.word_topic_matrix_service_callback,
         )
+        rospy.logdebug('Set up service for word-topic matrix at %s', self.word_topic_matrix_server.resolved_name)
+
         random_seed = self.param("random_seed")
         pyro.util.set_rng_seed(random_seed)
+        rospy.logdebug('Set random seed to %d', random_seed)
+
+        rospy.loginfo('Initialized SGDRFROS node.')
         self.training_timer = rospy.Timer(rospy.Duration(0.5), self.training_step_callback)
+        rospy.logdebug('Set up training timer to run every .5 seconds')
     
     def spin(self):
+        rospy.logdebug('Spinning node %s...', rospy.get_name())
         rospy.spin()
+        rospy.logdebug('Spinning interrupted. Shutting down training timer...')
         self.training_timer.shutdown()
+        rospy.logdebug('Training timer shut down.')
 
 
     def param_name(self, param: str):
@@ -127,7 +144,7 @@ class SGDRFNode:
             "weight": subsample_weight,
             "exponential": subsample_exp,
         }
-        sgdrf = SGDRF(
+        sgdrf_params = dict(
             xu_ns=xu_ns,
             d_mins=d_mins,
             d_maxs=d_maxs,
@@ -149,6 +166,11 @@ class SGDRFNode:
             fail_on_nan_loss=fail_on_nan_loss,
             num_particles=num_particles,
             jit=jit,
+        )
+        for param_name, param_val in sgdrf_params.items():
+            rospy.logdebug('(SGDRF param) %20s: %20s', param_name, str(param_val))
+        sgdrf = SGDRF(
+            **sgdrf_params
         )
         return sgdrf
 
@@ -176,6 +198,7 @@ class SGDRFNode:
     def training_step_callback(self, event):
         if self.sgdrf.n_xs > 0:
             loss = self.sgdrf.step()
+            rospy.logdebug('Training loss: %5.5f', loss)
 
             loss_msg = Float64()
             loss_msg.data = loss
@@ -192,6 +215,7 @@ class SGDRFNode:
         return torch.tensor(coord_list, dtype=torch.float, device=self.sgdrf.device)
 
     def topic_prob_service_callback(self, request: TopicProb) -> TopicProbResponse:
+        rospy.logdebug('Received topic prob request.')
         return TopicProbResponse(
             self.sgdrf.topic_prob(self.point_array_to_tensor(request.xs))
             .detach()
@@ -201,6 +225,7 @@ class SGDRFNode:
         )
 
     def word_prob_service_callback(self, request: WordProb) -> WordProbResponse:
+        rospy.logdebug('Received word prob request.')
         return WordProbResponse(
             self.sgdrf.word_prob(self.point_array_to_tensor(request.xs))
             .detach()
@@ -212,6 +237,7 @@ class SGDRFNode:
     def word_topic_matrix_service_callback(
         self, request: WordTopicMatrix
     ) -> WordTopicMatrixResponse:
+        rospy.logdebug('Received word-topic matrix request.')
         return WordTopicMatrixResponse(torch.flatten(self.sgdrf.word_topic_prob().detach().cpu()).tolist())  # type: ignore
 
     def generate_parameter(self, **kwargs):

@@ -12,15 +12,20 @@ from geometry_msgs.msg import Point
 from sgdrf_msgs.msg import CategoricalObservation
 from sgdrf_srvs.srv import (
     TopicProb,
+    TopicProbRequest,
     TopicProbResponse,
     WordProb,
+    WordProbRequest,
     WordProbResponse,
     WordTopicMatrix,
+    WordTopicMatrixRequest,
     WordTopicMatrixResponse,
     GPVariance,
+    GPVarianceRequest,
     GPVarianceResponse,
 )
 from std_msgs.msg import Float64
+from std_srvs.srv import Trigger, TriggerRequest, TriggerResponse
 
 from sgdrf import KernelType, OptimizerType, SubsampleType, SGDRF
 
@@ -70,6 +75,13 @@ class SGDRFNode:
         rospy.logdebug(
             "Set up service for word-topic matrix at %s",
             self.word_topic_matrix_server.resolved_name,
+        )
+        self.reset_sgdrf_server = rospy.Service(
+            "reset_sgdrf", Trigger, self.reset_sgdrf_service_callback
+        )
+        rospy.logdebug(
+            "Set up service for reset_sgdrf at %s",
+            self.reset_sgdrf_server.resolved_name,
         )
         self.gp_variance_server = rospy.Service(
             "gp_variance",
@@ -196,12 +208,6 @@ class SGDRFNode:
     def categorical_observation_to_tensors(self, msg: CategoricalObservation):
         point = msg.point
         obs = msg.obs
-        assert (
-            len(obs) == self.sgdrf.V
-        ), "message observation length does not match SGDRF initialized vocabulary size"
-        x_raw = [point.x]
-        if self.sgdrf.dims >= 2:
-            x_raw.append(point.y)
         if self.sgdrf.dims == 3:
             x_raw.append(point.z)
         xs = torch.tensor(x_raw, dtype=torch.float, device=self.sgdrf.device).unsqueeze(
@@ -233,7 +239,9 @@ class SGDRFNode:
             coord_list += [[p.z for p in point_array]]
         return torch.tensor(coord_list, dtype=torch.float, device=self.sgdrf.device)
 
-    def topic_prob_service_callback(self, request: TopicProb) -> TopicProbResponse:
+    def topic_prob_service_callback(
+        self, request: TopicProbRequest
+    ) -> TopicProbResponse:
         rospy.logdebug("Received topic prob request.")
         return TopicProbResponse(
             self.sgdrf.topic_prob(self.point_array_to_tensor(request.xs))
@@ -243,7 +251,9 @@ class SGDRFNode:
             .tolist()
         )
 
-    def gp_variance_service_callback(self, request: GPVariance) -> GPVarianceResponse:
+    def gp_variance_service_callback(
+        self, request: GPVarianceRequest
+    ) -> GPVarianceResponse:
         rospy.logdebug("Received GP variance request.")
         _, f_var = conditional(
             self.point_array_to_tensor(request.xs),
@@ -257,7 +267,7 @@ class SGDRFNode:
         )
         return GPVarianceResponse(f_var.detach().cpu().squeeze().tolist())
 
-    def word_prob_service_callback(self, request: WordProb) -> WordProbResponse:
+    def word_prob_service_callback(self, request: WordProbRequest) -> WordProbResponse:
         rospy.logdebug("Received word prob request.")
         return WordProbResponse(
             self.sgdrf.word_prob(self.point_array_to_tensor(request.xs))
@@ -268,10 +278,20 @@ class SGDRFNode:
         )
 
     def word_topic_matrix_service_callback(
-        self, request: WordTopicMatrix
+        self, request: WordTopicMatrixRequest
     ) -> WordTopicMatrixResponse:
         rospy.logdebug("Received word-topic matrix request.")
         return WordTopicMatrixResponse(torch.flatten(self.sgdrf.word_topic_prob().detach().cpu()).tolist())  # type: ignore
+
+    def reset_sgdrf_service_callback(self, request: TriggerRequest) -> TriggerResponse:
+        ret = TriggerResponse(success=False, message="Did not run reset.")
+        try:
+            self.sgdrf = self.initialize_sgdrf()
+            rospy.logdebug("Successfully reset sgdrf object")
+            ret = TriggerResponse(success=True, message="")
+        except Exception as e:
+            ret = TriggerResponse(success=False, message=str(e))
+        return ret
 
     def generate_parameter(self, **kwargs):
         param_name = self.param_name(kwargs["name"])

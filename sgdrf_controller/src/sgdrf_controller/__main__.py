@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-'''
+"""
 /!\ TODO /!\
 Please merge this with conductor_node.py.
-'''
+"""
 
 import functools
 import math
@@ -20,12 +20,81 @@ from ds_core_msgs.msg import RawData
 from ifcb.srv import RunRoutine
 from phyto_arm.msg import ConductorState, ConductorStates
 
+from gps_common.msg import GPSFix
+
+import filterpy
+import utm
+
+RADIANS_PER_DEGREE = np.pi / 180
+
+
 class PlannerNode:
     def __init__(self) -> None:
-        self.ifcb_run_routine = rospy.ServiceProxy('/ifcb/routine', RunRoutine)
+        self.ifcb_run_routine = rospy.ServiceProxy("/ifcb/routine", RunRoutine)
         self.ifcb_is_idle = threading.Event()
         self.last_cart_debub_time = None
         self.last_bead_time = None
+
+        self.filter = filterpy.kalman.UnscentedKalmanFilter(
+            dim_x=6,
+            dim_z=4,
+            dt=1,
+            hx=self.kalman_hx,
+            fx=self.kalman_fx,
+            points=filterpy.kalman.MerweScaledSigmaPoints(
+                4, alpha=0.1, beta=2.0, kappa=-1
+            ),
+            z_mean_fn=self.kalman_z_mean_fn,
+            residual_z=self.kalman_residual_z,
+        )
+        self.filter_initialized = False
+        self.gps_fix_sub = rospy.Subscriber(
+            "/gps/extended_fix", GPSFix, self.gpsfix_callback
+        )
+
+    @staticmethod
+    def kalman_hx(x: np.array) -> np.array:
+        z = np.zeros_like(x, shape=(4,))
+        z[0] = x[0]
+        z[1] = x[2]
+        z[2] = (90 - np.arctan2(x[3], x[1]) / RADIANS_PER_DEGREE) % 360
+        z[3] = np.sqrt(x[1] ** 2 + x[3] ** 2)
+
+    @staticmethod
+    def kalman_fx(x: np.array, dt: float) -> np.array:
+        m = np.array(
+            [
+                [1, dt, 0, 0, 0, 0],
+                [0, 1, dt, 0, 0, 0],
+                [0, 0, 1, 0, 0, 0],
+                [0, 0, 0, 1, dt, 0],
+                [0, 0, 0, 0, 1, dt],
+                [0, 0, 0, 0, 0, 1],
+            ],
+            dtype=float,
+        )
+        return np.dot(m, x)
+
+    @staticmethod
+    def kalman_z_mean_fn(sigmas: np.array, wm: np.array) -> np.array:
+        z = np.zeros(4)
+        sum_sin, sum_cos = 0.0, 0.0
+
+        for i in range(len(sigmas)):
+            s = sigmas[i]
+            z[0] += s[0] * wm[i]
+            z[1] += s[1] * wm[i]
+            z[3] += s[3] * wm[i]
+            sum_sin += np.sin(s[2] * RADIANS_PER_DEGREE) * wm[i]
+            sum_cos += np.cos(s[2] * RADIANS_PER_DEGREE) * wm[i]
+        z[2] = np.arctan2(sum_sin, sum_cos)
+        return z
+
+    @staticmethod
+    def kalman_residual_z(x: np.array, y: np.array) -> np.array:
+        ret = x - y
+        ret[2] = (x[2] - y[2]) % 360
+        return ret
 
     @classmethod
     def set_state(cls, pub: rospy.Publisher, s: ConductorStates):
@@ -38,7 +107,7 @@ class PlannerNode:
         # Parse the message and see if it is a marker
         marker = None
         parsed = parse_ifcb_msg(msg.data.decode())
-        if len(parsed) == 2 and parsed[0] == 'reportevent':
+        if len(parsed) == 2 and parsed[0] == "reportevent":
             marker = parse_ifcb_marker(parsed[1])
 
         # For routines sent with 'interactive:start', the IFCB will tell us when the
@@ -49,16 +118,50 @@ class PlannerNode:
         # The ifcb_is_idle Event should be clear()'d _before_ sending a routine, to
         # avoid a race condition where a thread sends a routine and then immediately
         # awaits the Event before we have been told the routine started.
-        if parsed == ['valuechanged', 'interactive', 'stopped']:
-            rospy.loginfo('IFCB routine not running')
+        if parsed == ["valuechanged", "interactive", "stopped"]:
+            rospy.loginfo("IFCB routine not running")
             self.ifcb_is_idle.set()
             return
 
         # Remaining behaviors depend on having a parsed marker
         if marker is None:
             return
-    
 
+    @staticmethod
+    def msg_to_z(msg: GPSFix) -> np.array:
+        lat = msg.latitude
+        lon = msg.longitude
+        track = msg.track
+        speed = msg.speed
+
+        easting, northing, _, _ = utm.from_latlon(lat, lon)
+
+        return np.array([easting, northing, track, speed])
+
+    @staticmethod
+    def msg_to_x(msg: GPSFix) -> np.array:
+        lat = msg.latitude
+        lon = msg.longitude
+        track = msg.track
+        speed = msg.speed
+        easting, northing, _, _ = utm.from_latlon(lat, lon)
+        vy = speed * np.cos(track * RADIANS_PER_DEGREE)
+        vx = np.sqrt(speed**2 - vy**2)
+        # No acceleration measurements, so these are set to 0
+        return np.array([easting, vx, 0, northing, vy, 0.0])
+
+    def gpsfix_callback(self, msg: GPSFix):
+        if self.filter_initialized:
+            self.filter.update(self.msg_to_z(msg))
+        else:
+            self.initialize_filter(msg)
+
+    def initialize_filter(self, msg: GPSFix):
+        self.filter.x = self.msg_to_x(msg)
+        self.filter.Q = filterpy.common.Q_discrete_white_noise(
+            dim=2, dt=1.0, var=1.0, block_size=2
+        )
+        self.filter.predict()
 
     def loop(self):
         # Wait for current IFCB activity to finish
@@ -69,27 +172,34 @@ class PlannerNode:
         playlist = []
 
         # Determine if it's time to run cartridge debubble
-        cart_debub_interval = rospy.Duration(60*rospy.get_param('~cartridge_debubble_interval'))
+        cart_debub_interval = rospy.Duration(
+            60 * rospy.get_param("~cartridge_debubble_interval")
+        )
         run_cart_debub = not math.isclose(cart_debub_interval.to_sec(), 0.0)  # disabled
-        if run_cart_debub and rospy.Time.now() - self.last_cart_debub_time > cart_debub_interval:
-            rospy.loginfo('Will run cartridege debubble this round')
-            playlist.append((ConductorStates.IFCB_CARTRIDGE_DEBUBBLE, 'cartridgedebubble'))
+        if (
+            run_cart_debub
+            and rospy.Time.now() - self.last_cart_debub_time > cart_debub_interval
+        ):
+            rospy.loginfo("Will run cartridege debubble this round")
+            playlist.append(
+                (ConductorStates.IFCB_CARTRIDGE_DEBUBBLE, "cartridgedebubble")
+            )
             self.last_cart_debub_time = rospy.Time.now()
 
         # Determine if it's time to run beads
-        bead_interval = rospy.Duration(60*rospy.get_param('~bead_interval'))
+        bead_interval = rospy.Duration(60 * rospy.get_param("~bead_interval"))
         run_beads = not math.isclose(bead_interval.to_sec(), 0.0)  # disabled
         if run_beads and rospy.Time.now() - self.last_bead_time > bead_interval:
-            rospy.loginfo('Will run beads this round')
-            playlist.append((ConductorStates.IFCB_DEBUBBLE, 'debubble'))
-            playlist.append((ConductorStates.IFCB_BEADS,    'beads'))
-            playlist.append((ConductorStates.IFCB_BIOCIDE,  'biocide'))
-            playlist.append((ConductorStates.IFCB_BLEACH,   'bleach'))
+            rospy.loginfo("Will run beads this round")
+            playlist.append((ConductorStates.IFCB_DEBUBBLE, "debubble"))
+            playlist.append((ConductorStates.IFCB_BEADS, "beads"))
+            playlist.append((ConductorStates.IFCB_BIOCIDE, "biocide"))
+            playlist.append((ConductorStates.IFCB_BLEACH, "bleach"))
             self.last_bead_time = rospy.Time.now()
 
         # Always run a debubble and sample
-        playlist.append((ConductorStates.IFCB_DEBUBBLE,  'debubble'))
-        playlist.append((ConductorStates.IFCB_RUNSAMPLE, 'runsample'))
+        playlist.append((ConductorStates.IFCB_DEBUBBLE, "debubble"))
+        playlist.append((ConductorStates.IFCB_RUNSAMPLE, "runsample"))
 
         # Run IFCB steps in sequence
         for state_const, routine in playlist:
@@ -99,21 +209,23 @@ class PlannerNode:
             # next loop() call we will wait for 'runsample' to complete.
             self.ifcb_is_idle.wait()
 
-            rospy.loginfo(f'Starting {routine} routine')
+            rospy.loginfo(f"Starting {routine} routine")
             self.set_state(state_const)
             self.ifcb_is_idle.clear()
             result = self.ifcb_run_routine(routine=routine, instrument=True)
             assert result.success
-    
+
     def run(self):
-        rospy.init_node('conductor', anonymous=True, log_level=rospy.DEBUG)
+        rospy.init_node("conductor", anonymous=True, log_level=rospy.DEBUG)
 
         # Publish state messages useful for debugging
-        set_state = functools.partial(self.set_state,
-            rospy.Publisher('~state', ConductorState, queue_size=1, latch=True))
+        set_state = functools.partial(
+            self.set_state,
+            rospy.Publisher("~state", ConductorState, queue_size=1, latch=True),
+        )
 
         # Subscribe to IFCB messages to track routine progress
-        rospy.Subscriber('/ifcb/in', RawData, self.on_ifcb_msg)
+        rospy.Subscriber("/ifcb/in", RawData, self.on_ifcb_msg)
 
         # Initialize service proxy for sending routines to the IFCB
         self.ifcb_run_routine.wait_for_service()
@@ -133,5 +245,5 @@ def main():
     node.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

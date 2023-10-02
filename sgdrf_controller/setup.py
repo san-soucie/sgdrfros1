@@ -5,8 +5,20 @@ from catkin_pkg.python_setup import generate_distutils_setup
 
 # fetch values from package.xml
 setup_args = generate_distutils_setup(
-    packages=['sgdrf_controller'],
-    package_dir={'': 'src'},
+    packages=["sgdrf_controller"],
+    package_dir={"": "src"},
+    install_requires=[
+        "ifcbclient",
+        "numpy",
+        "rospy",
+        "ifcb",
+        "ds_core_msgs",
+        "phyto_arm",
+        "sgdrf_msgs",
+        "sgdrf_srvs",
+        "utm",
+        "filterpy",
+    ],
 )
 
 setup(**setup_args)

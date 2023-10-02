@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   sgdrfros
   sgdrf_msgs
   sgdrf_srvs
+  gps_common
 )
 
 ## System dependencies are found with CMake's conventions

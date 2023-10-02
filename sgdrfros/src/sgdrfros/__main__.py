@@ -18,7 +18,7 @@ from sgdrf_srvs.srv import (
     WordTopicMatrix,
     WordTopicMatrixResponse,
     GPVariance,
-    GPVarianceResponse
+    GPVarianceResponse,
 )
 from std_msgs.msg import Float64
 
@@ -29,63 +29,78 @@ RANGETYPE = Tuple[Union[int, float], Union[int, float], Union[int, float]]
 
 class SGDRFNode:
     def __init__(self):
-        rospy.init_node('sgdrf')
-        rospy.loginfo('Starting node %s', rospy.get_name())
+        rospy.init_node("sgdrf")
+        rospy.loginfo("Starting node %s", rospy.get_name())
         self.parser = argparse.ArgumentParser()
         self.setup_parameters()
-        rospy.loginfo('Successfully set up parameters')
+        rospy.loginfo("Successfully set up parameters")
         self.sgdrf = self.initialize_sgdrf()
-        rospy.logdebug('Successfully set up sgdrf object')
-        rospy.set_param('~num_words', self.sgdrf.V)
-        rospy.logdebug('Using vocabulary of size %d for SGDRF model', self.sgdrf.V)
+        rospy.logdebug("Successfully set up sgdrf object")
+        rospy.set_param("~num_words", self.sgdrf.V)
+        rospy.logdebug("Using vocabulary of size %d for SGDRF model", self.sgdrf.V)
         self.obs_subscriber = rospy.Subscriber(
             f"categorical_observation__{self.sgdrf.V}__",
             CategoricalObservation,
             self.new_obs_callback,
         )
-        rospy.logdebug('Set up subscriber to topic "categorical_observation__%d__"', self.sgdrf.V)
+        rospy.logdebug(
+            'Set up subscriber to topic "categorical_observation__%d__"', self.sgdrf.V
+        )
         self.loss_publisher = rospy.Publisher("loss", Float64, queue_size=10)
-        rospy.logdebug('Set up publisher for training loss')
+        rospy.logdebug("Set up publisher for training loss")
         self.topic_prob_server = rospy.Service(
             "topic_prob", TopicProb, "topic_prob", self.topic_prob_service_callback
         )
-        rospy.logdebug('Set up service for topic probabilities at %s', self.topic_prob_server.resolved_name)
+        rospy.logdebug(
+            "Set up service for topic probabilities at %s",
+            self.topic_prob_server.resolved_name,
+        )
         self.word_prob_server = rospy.Service(
             "word_prob", WordProb, self.word_prob_service_callback
         )
-        rospy.logdebug('Set up service for word probabilities at %s', self.word_prob_server.resolved_name)
+        rospy.logdebug(
+            "Set up service for word probabilities at %s",
+            self.word_prob_server.resolved_name,
+        )
         self.word_topic_matrix_server = rospy.Service(
             "word_topic_matrix",
             WordTopicMatrix,
             self.word_topic_matrix_service_callback,
         )
-        rospy.logdebug('Set up service for word-topic matrix at %s', self.word_topic_matrix_server.resolved_name)
+        rospy.logdebug(
+            "Set up service for word-topic matrix at %s",
+            self.word_topic_matrix_server.resolved_name,
+        )
         self.gp_variance_server = rospy.Service(
             "gp_variance",
             GPVariance,
             self.gp_variance_service_callback,
         )
-        rospy.logdebug('Set up service for GP variance at %s', self.gp_variance_server.resolved_name)
+        rospy.logdebug(
+            "Set up service for GP variance at %s",
+            self.gp_variance_server.resolved_name,
+        )
 
         random_seed = self.param("random_seed")
         pyro.util.set_rng_seed(random_seed)
-        rospy.logdebug('Set random seed to %d', random_seed)
+        rospy.logdebug("Set random seed to %d", random_seed)
 
-        rospy.loginfo('Initialized SGDRFROS node.')
-        self.training_timer = rospy.Timer(rospy.Duration(0.5), self.training_step_callback)
-        rospy.logdebug('Set up training timer to run every .5 seconds')
-    
+        rospy.loginfo("Initialized SGDRFROS node.")
+        self.training_timer = rospy.Timer(
+            rospy.Duration(0.5), self.training_step_callback
+        )
+        rospy.logdebug("Set up training timer to run every .5 seconds")
+
     def spin(self):
-        rospy.logdebug('Spinning node %s...', rospy.get_name())
+        rospy.logdebug("Spinning node %s...", rospy.get_name())
         rospy.spin()
-        rospy.logdebug('Spinning interrupted. Shutting down training timer...')
+        rospy.logdebug("Spinning interrupted. Shutting down training timer...")
         self.training_timer.shutdown()
-        rospy.logdebug('Training timer shut down.')
-
+        rospy.logdebug("Training timer shut down.")
 
     def param_name(self, param: str):
-        return '/'.join([rospy.get_name(), param])
-    
+        return "/".join([rospy.get_name(), param])
+
     def param(self, param: str, default: Optional[Any] = None):
         return rospy.get_param(self.param_name(param), default=default)
 
@@ -174,10 +189,8 @@ class SGDRFNode:
             jit=jit,
         )
         for param_name, param_val in sgdrf_params.items():
-            rospy.logdebug('(SGDRF param) %20s: %20s', param_name, str(param_val))
-        sgdrf = SGDRF(
-            **sgdrf_params
-        )
+            rospy.logdebug("(SGDRF param) %20s: %20s", param_name, str(param_val))
+        sgdrf = SGDRF(**sgdrf_params)
         return sgdrf
 
     def categorical_observation_to_tensors(self, msg: CategoricalObservation):
@@ -204,7 +217,7 @@ class SGDRFNode:
     def training_step_callback(self, event):
         if self.sgdrf.n_xs > 0:
             loss = self.sgdrf.step()
-            rospy.logdebug('Training loss: %5.5f', loss)
+            rospy.logdebug("Training loss: %5.5f", loss)
 
             loss_msg = Float64()
             loss_msg.data = loss
@@ -221,7 +234,7 @@ class SGDRFNode:
         return torch.tensor(coord_list, dtype=torch.float, device=self.sgdrf.device)
 
     def topic_prob_service_callback(self, request: TopicProb) -> TopicProbResponse:
-        rospy.logdebug('Received topic prob request.')
+        rospy.logdebug("Received topic prob request.")
         return TopicProbResponse(
             self.sgdrf.topic_prob(self.point_array_to_tensor(request.xs))
             .detach()
@@ -229,8 +242,9 @@ class SGDRFNode:
             .squeeze()
             .tolist()
         )
+
     def gp_variance_service_callback(self, request: GPVariance) -> GPVarianceResponse:
-        rospy.logdebug('Received GP variance request.')
+        rospy.logdebug("Received GP variance request.")
         _, f_var = conditional(
             self.point_array_to_tensor(request.xs),
             self.sgdrf.xu,
@@ -239,12 +253,12 @@ class SGDRFNode:
             self.sgdrf.uscaletril,
             full_cov=False,
             whiten=self.sgdrf.whiten,
-            jitter=self.sgdrf.jitter
+            jitter=self.sgdrf.jitter,
         )
-        return GPVarianceResponse(f_var)
+        return GPVarianceResponse(f_var.detach().cpu().squeeze().tolist())
 
     def word_prob_service_callback(self, request: WordProb) -> WordProbResponse:
-        rospy.logdebug('Received word prob request.')
+        rospy.logdebug("Received word prob request.")
         return WordProbResponse(
             self.sgdrf.word_prob(self.point_array_to_tensor(request.xs))
             .detach()
@@ -256,15 +270,17 @@ class SGDRFNode:
     def word_topic_matrix_service_callback(
         self, request: WordTopicMatrix
     ) -> WordTopicMatrixResponse:
-        rospy.logdebug('Received word-topic matrix request.')
+        rospy.logdebug("Received word-topic matrix request.")
         return WordTopicMatrixResponse(torch.flatten(self.sgdrf.word_topic_prob().detach().cpu()).tolist())  # type: ignore
 
     def generate_parameter(self, **kwargs):
         param_name = self.param_name(kwargs["name"])
         arg_name = "--" + kwargs["name"].replace("_", "-")
-        kwargs["default"] = rospy.get_param(param_name, default=kwargs.pop('value', None))
+        kwargs["default"] = rospy.get_param(
+            param_name, default=kwargs.pop("value", None)
+        )
         kwargs["help"] = kwargs.pop("description", "")
-        kwargs.pop('name')
+        kwargs.pop("name")
         self.parser.add_argument(arg_name, **kwargs)
 
     def setup_parameters(self):

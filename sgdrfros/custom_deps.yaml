@@ -1,0 +1,5 @@
+# sudo bash -c "echo yaml file://$(readlink -f custom_deps.yaml) >> /etc/ros/rosdep/sources.list.d/20-default.list"
+python-sgdrf-pip:
+    ubuntu: 
+        pip:
+            packages: ['sgdrf']

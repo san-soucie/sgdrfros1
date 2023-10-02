@@ -1,4 +1,0 @@
-python-sgdrf-pip:
-    ubuntu: 
-        pip:
-            packages: ['sgdrf']

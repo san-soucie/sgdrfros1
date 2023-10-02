@@ -5,6 +5,7 @@ from typing import Any, Optional, Union, Tuple, List
 
 import pyro
 import pyro.util
+from pyro.contrib.gp.util import conditional
 import torch
 from geometry_msgs.msg import Point
 
@@ -16,13 +17,12 @@ from sgdrf_srvs.srv import (
     WordProbResponse,
     WordTopicMatrix,
     WordTopicMatrixResponse,
+    GPVariance,
+    GPVarianceResponse
 )
 from std_msgs.msg import Float64
 
-from .kernel import KernelType
-from .model import SGDRF
-from .optimizer import OptimizerType
-from .subsample import SubsampleType
+from sgdrf import KernelType, OptimizerType, SubsampleType, SGDRF
 
 RANGETYPE = Tuple[Union[int, float], Union[int, float], Union[int, float]]
 
@@ -60,6 +60,12 @@ class SGDRFNode:
             self.word_topic_matrix_service_callback,
         )
         rospy.logdebug('Set up service for word-topic matrix at %s', self.word_topic_matrix_server.resolved_name)
+        self.gp_variance_server = rospy.Service(
+            "gp_variance",
+            GPVariance,
+            self.gp_variance_service_callback,
+        )
+        rospy.logdebug('Set up service for GP variance at %s', self.gp_variance_server.resolved_name)
 
         random_seed = self.param("random_seed")
         pyro.util.set_rng_seed(random_seed)
@@ -223,6 +229,19 @@ class SGDRFNode:
             .squeeze()
             .tolist()
         )
+    def gp_variance_service_callback(self, request: GPVariance) -> GPVarianceResponse:
+        rospy.logdebug('Received GP variance request.')
+        _, f_var = conditional(
+            self.point_array_to_tensor(request.xs),
+            self.sgdrf.xu,
+            self.sgdrf.kernel,
+            self.sgdrf.uloc,
+            self.sgdrf.uscaletril,
+            full_cov=False,
+            whiten=self.sgdrf.whiten,
+            jitter=self.sgdrf.jitter
+        )
+        return GPVarianceResponse(f_var)
 
     def word_prob_service_callback(self, request: WordProb) -> WordProbResponse:
         rospy.logdebug('Received word prob request.')

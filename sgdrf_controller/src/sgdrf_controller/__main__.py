@@ -27,13 +27,29 @@ import utm
 
 RADIANS_PER_DEGREE = np.pi / 180
 
+from enum import Enum
+
+
+class PlannerState(Enum):
+    OFF = 0
+    STANDARD_SAMPLE = 1
+    STANDARD_DEBUBBLE = 2
+    ADAPTIVE_SAMPLE = 3
+    ADAPTIVE_DEBUBBLE = 4
+    TURNING = 5
+
 
 class PlannerNode:
     def __init__(self) -> None:
-        self.ifcb_run_routine = rospy.ServiceProxy("/ifcb/routine", RunRoutine)
+        self.planner_state = PlannerState.OFF
+        self.ifcb_run_routine = None  # rospy.ServiceProxy("/ifcb/routine", RunRoutine)
         self.ifcb_is_idle = threading.Event()
         self.last_cart_debub_time = None
         self.last_bead_time = None
+        self.lat = 0.0
+        self.lon = 0.0
+        self.max_lat = rospy.get_param("max_lat")
+        self.min_lat = rospy.get_param("min_lat")
 
         self.filter = filterpy.kalman.UnscentedKalmanFilter(
             dim_x=6,
@@ -48,8 +64,18 @@ class PlannerNode:
             residual_z=self.kalman_residual_z,
         )
         self.filter_initialized = False
+        self.gps_fix_sub = (
+            None  # rospy.Subscriber("/gps/extended_fix", GPSFix, self.gpsfix_callback)
+        )
+
+    def setup_pub_sub_srv(self):
+        self.ifcb_run_routine = rospy.ServiceProxy("/ifcb/routine", RunRoutine)
         self.gps_fix_sub = rospy.Subscriber(
             "/gps/extended_fix", GPSFix, self.gpsfix_callback
+        )
+        self.on_ifcb_msg_sub = rospy.Subscriber("/ifcb/in", RawData, self.on_ifcb_msg)
+        self.set_state_pub = rospy.Publisher(
+            "~state", ConductorState, queue_size=1, latch=True
         )
 
     @staticmethod
@@ -96,12 +122,11 @@ class PlannerNode:
         ret[2] = (x[2] - y[2]) % 360
         return ret
 
-    @classmethod
-    def set_state(cls, pub: rospy.Publisher, s: ConductorStates):
+    def set_state(self, s: ConductorStates):
         m = ConductorState()
         m.header.stamp = rospy.Time.now()
         m.state = s
-        pub.publish(m)
+        self.set_state_pub.publish(m)
 
     def on_ifcb_msg(self, msg: RawData):
         # Parse the message and see if it is a marker
@@ -151,6 +176,10 @@ class PlannerNode:
         return np.array([easting, vx, 0, northing, vy, 0.0])
 
     def gpsfix_callback(self, msg: GPSFix):
+        self.lat = msg.latitude
+        self.lon = msg.longitude
+        self.track = msg.track
+        self.speed = msg.speed
         if self.filter_initialized:
             self.filter.update(self.msg_to_z(msg))
         else:
@@ -215,17 +244,54 @@ class PlannerNode:
             result = self.ifcb_run_routine(routine=routine, instrument=True)
             assert result.success
 
-    def run(self):
-        rospy.init_node("conductor", anonymous=True, log_level=rospy.DEBUG)
-
-        # Publish state messages useful for debugging
-        set_state = functools.partial(
-            self.set_state,
-            rospy.Publisher("~state", ConductorState, queue_size=1, latch=True),
+    def about_to_turn(self) -> bool:
+        return (
+            (self.planner_state != PlannerState.TURNING)
+            and (
+                np.isclose(self.lat, self.max_lat) or np.isclose(self.lon, self.max_lon)
+            )
+            and self.speed < 0.1
         )
 
-        # Subscribe to IFCB messages to track routine progress
-        rospy.Subscriber("/ifcb/in", RawData, self.on_ifcb_msg)
+    def ready_to_start_next(self) -> bool:
+        return (
+            (self.planner_state == PlannerState.TURNING)
+            and (self.speed > 1)
+            and (self.going_north() or self.going_south())
+        )
+
+    def going_north(self) -> bool:
+        return np.isclose(self.track, 0) or np.isclose(self.track, 360)
+
+    def going_south(self) -> bool:
+        return np.isclose(self.track, 90)
+
+    def run_debubble(self):
+        self.set_state(ConductorStates.IFCB_DEBUBBLE)
+        self.ifcb_is_idle.clear()
+        result = self.ifcb_run_routine(routine="debubble", instrument=True)
+        assert result.success
+
+    def control_loop(self):
+        # First, check if we have hit a GPS boundary
+        if self.about_to_turn():
+            self.planner_state = PlannerState.TURNING
+        elif self.ready_to_start_next():
+            if self.going_north():
+                self.planner_state = PlannerState.ADAPTIVE_DEBUBBLE
+                self.run_debubble()
+            elif self.going_south():
+                self.planner_state = PlannerState.STANDARD_DEBUBBLE
+            else:
+                rospy.logdebug(
+                    "Not heading north or south, so not shifting to debubble"
+                )
+        elif self.planner_state == PlannerState.ADAPTIVE_DEBUBBLE:
+            pass
+
+    def run(self):
+        rospy.init_node("conductor", anonymous=True, log_level=rospy.DEBUG)
+        self.setup_pub_sub_service()
 
         # Initialize service proxy for sending routines to the IFCB
         self.ifcb_run_routine.wait_for_service()

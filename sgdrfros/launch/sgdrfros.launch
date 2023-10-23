@@ -1,23 +1,18 @@
 <launch>
-    <arg name="dims" value="2" />
-    <arg name="xu-ns" value="5" />
-    <arg name="d-mins" value="[42.98963, -70.60236]" />
-    <arg name="d-maxs" value="[42.98964, -70.60237]" />
+    <arg name="dims" value="1" />
+    <arg name="xu-ns" value="50" />
+    <arg name="d-mins" value="[-70.60236]" />
+    <arg name="d-maxs" value="[-70.60237]" />
     <arg name="V" value="21" />
     <arg name="K" value="4" />
     <arg name="max-obs" value="1000" />
     <arg name="dir-p" value="0.0001" />
-    <arg name="kernel-type" value="Matern32" />
     <arg name="kernel-lengthscale" value="0.00005" />
     <arg name="kernel-variance" value="1.0" />
-    <arg name="optimizer-type" value="Adam" />
     <arg name="optimizer-lr" value="0.001" />
     <arg name="optimizer-clip-norm" value="10.0" />
     <arg name="device" value="cpu" />
     <arg name="subsample-n" value="10" />
-    <arg name="subsample-type" value="uniform" />
-    <arg name="subsample-weight" value="0.5" />
-    <arg name="subsample-exp" value="0.1" />
     <arg name="whiten" value="false" />
     <arg name="fail-on-nan-loss" value="false" />
     <arg name="num-particles" value="10" />
@@ -38,17 +33,12 @@
         <param name="K" value="$(arg K)" />
         <param name="max-obs" value="$(arg max-obs)" />
         <param name="dir-p" value="$(arg dir-p)" />
-        <param name="kernel-type" value="$(arg kernel-type)" />
         <param name="kernel-lengthscale" value="$(arg kernel-lengthscale)" />
         <param name="kernel-variance" value="$(arg kernel-variance)" />
-        <param name="optimizer-type" value="$(arg optimizer-type)" />
         <param name="optimizer-lr" value="$(arg optimizer-lr)" />
         <param name="optimizer-clip-norm" value="$(arg optimizer-clip-norm)" />
         <param name="device" value="$(arg device)" />
         <param name="subsample-n" value="$(arg subsample-n)" />
-        <param name="subsample-type" value="$(arg subsample-type)" />
-        <param name="subsample-weight" value="$(arg subsample-weight)" />
-        <param name="subsample-exp" value="$(arg subsample-exp)" />
         <param name="whiten" value="$(arg whiten)" />
         <param name="fail-on-nan-loss" value="$(arg fail-on-nan-loss)" />
         <param name="num-particles" value="$(arg num-particles)" />

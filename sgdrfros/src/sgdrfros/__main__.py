@@ -5,8 +5,11 @@ from typing import Any, Optional, Union, Tuple, List
 
 import pyro
 import pyro.util
+import pyro.contrib.gp
+import pyro.contrib.gp.kernels
 from pyro.contrib.gp.util import conditional
 import torch
+import numpy as np
 from geometry_msgs.msg import Point
 
 from sgdrf_msgs.msg import CategoricalObservation
@@ -27,7 +30,7 @@ from sgdrf_srvs.srv import (
 from std_msgs.msg import Float64
 from std_srvs.srv import Trigger, TriggerRequest, TriggerResponse
 
-from sgdrf import KernelType, OptimizerType, SubsampleType, SGDRF
+from sgdrf import SGDRF, SGDRFConfig, UniformSubsampler
 
 RANGETYPE = Tuple[Union[int, float], Union[int, float], Union[int, float]]
 
@@ -137,46 +140,48 @@ class SGDRFNode:
         V = self.param("V")
         K = self.param("K")
         max_obs = self.param("max_obs")
-
+        device_string = self.param("device")
+        device = torch.device(device_string)
         dir_p = self.param("dir_p")
         assert dir_p > 0, "dir_p must be greater than zero"
-        kernel_type_string = self.param("kernel_type")
-        assert (
-            kernel_type_string in KernelType._member_names_
-        ), "kernel_type must be one of " + str(KernelType._member_names_)
-        kernel_type = KernelType[kernel_type_string]
         kernel_lengthscale = self.param("kernel_lengthscale")
         assert kernel_lengthscale > 0, "kernel_lengthscale must be greater than zero"
         kernel_variance = self.param("kernel_variance")
         assert kernel_variance > 0, "kernel_variance must be greater than zero"
-        optimizer_type_string = self.param("optimizer_type")
-        assert (
-            optimizer_type_string in OptimizerType._member_names_
-        ), "optimizer_type must be one of " + str(OptimizerType._member_names_)
-        optimizer_type = OptimizerType[optimizer_type_string]
+        kernel = pyro.contrib.gp.kernels.Matern32(
+            input_dim=dims, lengthscale=kernel_lengthscale, variance=kernel_variance
+        ).to(device)
         optimizer_lr = self.param("optimizer_lr")
         assert optimizer_lr > 0, "optimizer_lr must be greater than zero"
         optimizer_clip_norm = self.param("optimizer_clip_norm")
         assert optimizer_clip_norm > 0, "optimizer_lr must be greater than zero"
-        device_string = self.param("device")
-        device = torch.device(device_string)
+        optimizer = pyro.optim.ClippedAdam(
+            {"lr": optimizer_lr, "clip_norm": optimizer_clip_norm}
+        )
+
         subsample_n = self.param("subsample_n")
-        subsample_type_string = self.param("subsample_type")
-        assert (
-            subsample_type_string in SubsampleType._member_names_
-        ), "subsample_type must be one of " + str(SubsampleType._member_names_)
-        subsample_type = SubsampleType[subsample_type_string]
-        subsample_weight = self.param("subsample_weight")
-        subsample_exp = self.param("subsample_exp")
-        assert subsample_exp > 0, "subsample_exp must be greater than zero"
+        subsampler = UniformSubsampler(n=subsample_n, device=device)
         whiten = self.param("whiten")
         fail_on_nan_loss = self.param("fail_on_nan_loss")
         num_particles = self.param("num_particles")
         jit = self.param("jit")
-        subsample_params = {
-            "weight": subsample_weight,
-            "exponential": subsample_exp,
-        }
+        config = SGDRFConfig(
+            xu_ns=xu_ns,
+            d_mins=d_mins,
+            d_maxs=d_maxs,
+            V=V,
+            K=K,
+            max_obs=max_obs,
+            dir_p=dir_p,
+            kernel=kernel,
+            optimizer=optimizer,
+            subsampler=subsampler,
+            device=device,
+            whiten=whiten,
+            fail_on_nan_loss=fail_on_nan_loss,
+            num_particles=num_particles,
+            jit=jit,
+        )
         sgdrf_params = dict(
             xu_ns=xu_ns,
             d_mins=d_mins,
@@ -185,16 +190,12 @@ class SGDRFNode:
             K=K,
             max_obs=max_obs,
             dir_p=dir_p,
-            kernel_type=kernel_type,
             kernel_lengthscale=kernel_lengthscale,
             kernel_variance=kernel_variance,
-            optimizer_type=optimizer_type,
             optimizer_lr=optimizer_lr,
             optimizer_clip_norm=optimizer_clip_norm,
             device=device,
             subsample_n=subsample_n,
-            subsample_type=subsample_type,
-            subsample_params=subsample_params,
             whiten=whiten,
             fail_on_nan_loss=fail_on_nan_loss,
             num_particles=num_particles,
@@ -202,17 +203,21 @@ class SGDRFNode:
         )
         for param_name, param_val in sgdrf_params.items():
             rospy.logdebug("(SGDRF param) %20s: %20s", param_name, str(param_val))
-        sgdrf = SGDRF(**sgdrf_params)
+        sgdrf = SGDRF(config)
         return sgdrf
 
     def categorical_observation_to_tensors(self, msg: CategoricalObservation):
         point = msg.point
         obs = msg.obs
+        if self.sgdrf.dims == 1:
+            x_raw = [point.y]
+        if self.sgdrf.dims == 2:
+            x_raw = [point.x, point.y]
         if self.sgdrf.dims == 3:
-            x_raw.append(point.z)
-        xs = torch.tensor(x_raw, dtype=torch.float, device=self.sgdrf.device).unsqueeze(
-            0
-        )
+            x_raw = [point.x, point.y, point.z]
+        xs = torch.tensor(
+            np.array(x_raw), dtype=torch.float, device=self.sgdrf.device
+        ).unsqueeze(0)
         ws = torch.tensor(obs, dtype=torch.int, device=self.sgdrf.device).unsqueeze(0)
         return xs, ws
 
@@ -363,12 +368,6 @@ class SGDRFNode:
             description="uniform dirichlet hyperparameter",
         )
         self.generate_parameter(
-            name="kernel_type",
-            value="Matern32",
-            description="kernel type",
-            choices=KernelType._member_names_,
-        )
-        self.generate_parameter(
             name="kernel_lengthscale",
             value=1.0,
             type=float,
@@ -379,12 +378,6 @@ class SGDRFNode:
             value=1.0,
             type=float,
             description="isotropic kernel variance",
-        )
-        self.generate_parameter(
-            name="optimizer_type",
-            value="Adam",
-            description="optimizer type",
-            choices=OptimizerType._member_names_,
         )
         self.generate_parameter(
             name="optimizer_lr",
@@ -408,24 +401,6 @@ class SGDRFNode:
             value=5,
             type=int,
             description="number of past observations for each subsample",
-        )
-        self.generate_parameter(
-            name="subsample_type",
-            value="uniform",
-            description="subsample type",
-            choices=SubsampleType._member_names_,
-        )
-        self.generate_parameter(
-            name="subsample_weight",
-            value=0.5,
-            type=float,
-            description="weight to assign to first component of compound subsample strategy",
-        )
-        self.generate_parameter(
-            name="subsample_exp",
-            value=0.1,
-            type=float,
-            description="exponential parameter for subsample strategy, if applicable",
         )
         self.generate_parameter(
             name="whiten",

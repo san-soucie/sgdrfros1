@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   sgdrf_msgs
   sgdrf_srvs
   gps_common
+  python3-transitions
 )
 
 ## System dependencies are found with CMake's conventions

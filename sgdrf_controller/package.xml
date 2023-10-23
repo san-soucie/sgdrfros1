@@ -59,6 +59,7 @@
   <depend>gps_common</depend>
   <depend>python3-filterpy-pip</depend>
   <depend>python-utm-pip</depend>
+  <depend>python3-transitions</depend>
   <!-- The export tag contains other, unspecified, tags -->
   <export>
     <!-- Other tools can request additional information be placed here -->

@@ -19,6 +19,7 @@ setup_args = generate_distutils_setup(
         "utm",
         "filterpy",
     ],
+    include_package_data=True,
 )
 
 setup(**setup_args)

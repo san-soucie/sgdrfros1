@@ -1,0 +1,16 @@
+<launch>
+    <arg name="min_lat" value="0" />
+    <arg name="max_lat" value="1" />
+    <arg name="bead_interval" value="60" />
+    <arg name="cartridge_debubble_interval" value="60" />
+    <arg name="gps_topic_name" value="/gps_spoof/extended_fix" />
+    <node pkg="sgdrf_controller" type="node.py" name="sgdrf_controller" output="log">
+        <param name="min_lat" value="$(arg min_lat)" />
+        <param name="max_lat" value="$(arg max_lat)" />
+        <param name="bead_interval" value="$(arg bead_interval)" />
+        <param name="cartridge_debubble_interval" value="$(arg cartridge_debubble_interval)" />
+        <param name="gps_topic_name" value="$(arg gps_topic_name)" />
+    </node>
+    <node pkg="sgdrf_controller" type="sim_gps.py" name="sim_gps" />
+    <node pkg="rosservice" type="rosservice" name="set_sgdrf_controller_base_log_level" args="call --wait /sgdrf_controller/set_logger_level 'ros.sgdrf_controller' 'debug'" />
+</launch>

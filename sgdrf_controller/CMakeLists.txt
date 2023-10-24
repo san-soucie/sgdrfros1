@@ -14,7 +14,9 @@ find_package(catkin REQUIRED COMPONENTS
   sgdrf_msgs
   sgdrf_srvs
   gps_common
-  python3-transitions
+  ds_core_msgs
+  std_msgs
+  std_srvs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -165,7 +167,15 @@ include_directories(
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
   scripts/node.py
+  scripts/sim_gps.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(FILES
+  src/sgdrf_controller/state_machine.yaml
+  launch/controller.launch
+  launch/controller_sim.launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
 ## Mark executables for installation

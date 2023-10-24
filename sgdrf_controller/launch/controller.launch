@@ -1,0 +1,14 @@
+<launch>
+    <arg name="min_lat" value="0" />
+    <arg name="max_lat" value="1" />
+    <arg name="bead_interval" value="60" />
+    <arg name="cartridge_debubble_interval" value="60" />
+    <arg name="gps_topic_name" value="/gps/extended_fix" />
+    <node pkg="sgdrf_controller" type="node.py" name="sgdrf_controller">
+        <param name="min_lat" value="$(arg min_lat)" />
+        <param name="max_lat" value="$(arg max_lat)" />
+        <param name="bead_interval" value="$(arg bead_interval)" />
+        <param name="cartridge_debubble_interval" value="$(arg cartridge_debubble_interval)" />
+        <param name="gps_topic_name" value="$(arg gps_topic_name)" />
+    </node>
+</launch>

@@ -1,0 +1,1 @@
+NOTE: you must `python3 -m pip install --upgrade transitions`, as this package requires transitions >=v0.9.0, while the apt version may be older.

@@ -24,7 +24,7 @@ jobs:
             insecure: true
             accessKey: "ghrunner"
             secretKey: ${{ secrets.SEAWEED_AUTH }}
-            bucket: gh
+            bucket: ghrunner
             region: local
             use-fallback: true
             path: .buildx-cache

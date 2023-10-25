@@ -40,7 +40,7 @@ RUN catkin config --merge-install --merge-devel --install
 # Install dependencies declared in package.xml files
 RUN apt update \
         && rosdep update \
-        && rosdep install --default-yes --from-paths ./src --ignore-src --skip-keys=sgdrf_msgs -t build \
+        && rosdep install --default-yes --from-paths ./src --ignore-src --skip-keys=sgdrf_msgs \
         && rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install -r /app/src/PhytO-ARM/deps/python3-requirements.txt
 

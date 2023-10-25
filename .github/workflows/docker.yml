@@ -6,31 +6,10 @@ on:
     workflow_dispatch:
 jobs:
     push-image:
-        runs-on: self-hosted
+        runs-on: ubuntu-latest
         steps:
         - uses: actions/checkout@v4
-        - uses: actions/setup-python@v4
-          with:
-            python-version: '3.8'
-            cache: 'pip'
-            cache-dependency-path: |
-              **/requirements*.txt
         - uses: docker/setup-buildx-action@v3
-        - name: Cache Docker layers
-          uses: tespkg/actions-cache@v1
-          with:
-            endpoint: "127.0.0.1"
-            port: 8333
-            insecure: true
-            accessKey: "ghrunner"
-            secretKey: ${{ secrets.SEAWEED_AUTH }}
-            bucket: ghrunner
-            region: local
-            use-fallback: true
-            path: .buildx-cache
-            key: ${{ runner.os }}-buildx-${{ github.sha }}
-            restore-keys: |
-              ${{ runner.os }}-buildx-
         - uses: docker/login-action@v3
           with:
             registry: ghcr.io
@@ -42,9 +21,3 @@ jobs:
               context: .
               push: false
               tags: ghcr.io/${{github.repository}}:latest
-              cache-from: type=local,src=/tmp/.buildx-cache
-              cache-to: type=local,dest=/tmp/.buildx-cache-new
-        - name: Move cache
-          run: |
-            rm -rf /tmp/.buildx-cache
-            mv /tmp/.buildx-cache-new /tmp/.buildx-cache

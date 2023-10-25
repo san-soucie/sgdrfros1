@@ -57,13 +57,13 @@
   <depend>sgdrf_srvs</depend>
   <depend>ds_core_msgs</depend>
   <depend>gps_common</depend>
-  <depend>python3-filterpy-pip</depend>
-  <depend>python-utm-pip</depend>
-  <depend>python3-transitions</depend>
-  <depend>python3-yaml</depend>
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
-  <depend>python3-numpy</depend>
+  <exec_depend>python3-filterpy-pip</exec_depend>
+  <exec_depend>python-utm-pip</exec_depend>
+  <exec_depend>python3-transitions</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <!-- The export tag contains other, unspecified, tags -->
   <export>
     <!-- Other tools can request additional information be placed here -->

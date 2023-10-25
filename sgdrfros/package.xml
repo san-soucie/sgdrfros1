@@ -49,18 +49,8 @@
   <!-- Use doc_depend for packages you need only for building documentation: -->
   <!--   <doc_depend>doxygen</doc_depend> -->
   <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>sgdrf_msgs</build_depend>
-  <build_depend>sgdrf_srvs</build_depend>
-  <build_depend>python-sgdrf-pip</build_depend>
-  <build_depend>python-pytorch-pip</build_depend>
-  <build_depend>python3-pyro-ppl-pip</build_depend>
-  <build_export_depend>sgdrf_msgs</build_export_depend>
-  <build_export_depend>sgdrf_srvs</build_export_depend>
-  <build_export_depend>python-sgdrf-pip</build_export_depend>
-  <build_export_depend>python-pytorch-pip</build_export_depend>
-  <build_export_depend>python3-pyro-ppl-pip</build_export_depend>
-  <exec_depend>sgdrf_msgs</exec_depend>
-  <exec_depend>sgdrf_srvs</exec_depend>
+  <depend>sgdrf_msgs</depend>
+  <depend>sgdrf_srvs</depend>
   <exec_depend>python-sgdrf-pip</exec_depend>
   <exec_depend>python-pytorch-pip</exec_depend>
   <exec_depend>python3-pyro-ppl-pip</exec_depend>

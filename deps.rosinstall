@@ -27,7 +27,3 @@ repositories:
     type: git
     url: https://github.com/WHOIGit/ros-triton-classifier.git
     version: main
-  sgdrfros1:
-    type: git
-    url: https://github.com/san-soucie/sgdrfros1.git
-    version: main

@@ -51,7 +51,7 @@ RUN sed -i 's/"Phins"/"PhinsConfig"/' /app/src/ds_msgs/ds_sensor_msgs/cfg/PhinsC
 # Warm the build directory with pre-built packages that don't change often.
 # This list can be updated according to `catkin build --dry-run phyto_arm`.
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
-        && stdbuf -o L catkin build \
+        && catkin build --cmake-args -DSETUPTOOLS_DEB_LAYOUT=OFF \
         ds_core_msgs \
         ds_sensor_msgs \
         ds_util_nodes \
@@ -74,7 +74,7 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
         ds_base
 
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
-        && stdbuf -o L catkin build \
+        && catkin build --cmake-args -DSETUPTOOLS_DEB_LAYOUT=OFF  \
         aml_ctd           \
         ifcb              \
         jvl_motor         \
@@ -97,7 +97,7 @@ RUN apt update \
 RUN python3 -m pip install --upgrade transitions
 
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
-        && stdbuf -o L catkin build
+        && catkin build --cmake-args -DSETUPTOOLS_DEB_LAYOUT=OFF 
 
 FROM base
 

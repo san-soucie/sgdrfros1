@@ -21,7 +21,6 @@ jobs:
               base-image: rwthika/ros-torch:noetic-desktop-full-torch2.0.1-cpp-v23.08
               command: roslaunch sgdrfros sgdrfros.launch
               platform: amd64,arm64
-              additional-pip-file: .docker/additional-pip-requirements.txt
               enable-singlearch-push: true
               enable-push-as-latest: true
         # - uses: easimon/maximize-build-space@v8

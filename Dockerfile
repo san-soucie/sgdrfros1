@@ -38,48 +38,11 @@ RUN echo Installing ROS dependencies:${DEPSCACHE} \
         && mkdir ./src \
         && vcs import src < deps.rosinstall
 
-RUN catkin config --merge-install --merge-devel --install
+RUN catkin config --install --merge-install
 
 # Install dependencies declared in package.xml files
-RUN apt update \
-        && rosdep update \
-        && rosdep install --default-yes --from-paths ./src --ignore-src --skip-keys=sgdrf_msgs \
-        && rm -rf /var/lib/apt/lists/*
-RUN python3 -m pip install -r /app/src/PhytO-ARM/deps/python3-requirements.txt
 
 RUN sed -i 's/"Phins"/"PhinsConfig"/' /app/src/ds_msgs/ds_sensor_msgs/cfg/PhinsConfig.cfg
-# Warm the build directory with pre-built packages that don't change often.
-# This list can be updated according to `catkin build --dry-run phyto_arm`.
-RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
-        && catkin build --cmake-args -DSETUPTOOLS_DEB_LAYOUT=OFF \
-        ds_core_msgs \
-        ds_sensor_msgs \
-        ds_util_nodes \
-        rtsp_camera \
-        ds_sensor_parsers \
-        ds_sensors        \
-        ds_util_nodes     \
-        ds_acomms_msgs    \
-        ds_actuator_msgs  \
-        ds_asio           \
-        ds_hotel_msgs     \
-        ds_multibeam_msgs \
-        ds_mx_msgs        \
-        ds_nav_msgs       \
-        ds_control_msgs   \
-        ds_nmea_msgs      \
-        ds_nmea_parsers   \
-        ds_ocomms_msgs    \
-        ds_param          \
-        ds_base
-
-RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
-        && catkin build --cmake-args -DSETUPTOOLS_DEB_LAYOUT=OFF  \
-        aml_ctd           \
-        ifcb              \
-        jvl_motor         \
-        phyto_arm         \
-        rbr_maestro3_ctd 
 
 RUN mkdir -p /app/src/sgdrfros1/sgdrf_controller \
         && mkdir /app/src/sgdrfros1/sgdrf_msgs \
@@ -92,9 +55,10 @@ COPY --link ./sgdrfros /app/src/sgdrfros1/sgdrfros
 
 RUN apt update \
         && rosdep update \
-        && rosdep install --default-yes --from-paths ./src --ignore-src -t build \
+        && rosdep install --default-yes --from-paths ./src --ignore-src \
         && rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install --upgrade transitions
+RUN python3 -m pip install -r /app/src/PhytO-ARM/deps/python3-requirements.txt
 
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
         && catkin build --cmake-args -DSETUPTOOLS_DEB_LAYOUT=OFF 

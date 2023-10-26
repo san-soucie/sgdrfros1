@@ -8,11 +8,14 @@ jobs:
     build:
         runs-on: ubuntu-latest
         steps:
-          - run: |
-              rm -rf /usr/share/dotnet
-              rm -rf /opt/ghc
-              rm -rf "/usr/local/share/boost"
-              rm -rf "$AGENT_TOOLSDIRECTORY"
+          - uses: easimon/maximize-build-space@v8
+            with:
+              root-reserve-mb: 512
+              swap-size-mb: 1024
+              remove-dotnet: true
+              remove-android: true
+              remove-codeql: true
+              remove-haskell: true
           - uses: ika-rwth-aachen/docker-ros@v1.3.1
             with:
               base-image: rwthika/ros-torch:noetic-desktop-full-torch2.0.1-cpp-v23.08

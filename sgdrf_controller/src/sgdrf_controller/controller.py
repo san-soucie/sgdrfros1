@@ -9,6 +9,10 @@ import filterpy.kalman
 import numpy as np
 from ifcbclient.protocol import parse_response as parse_ifcb_msg
 from ifcb.instrumentation import parse_marker as parse_ifcb_marker
+from sgdrf_controller_msgs.msg import ControllerState, ControllerStatus
+from std_msgs.msg import Header
+
+import pdb
 
 from ds_core_msgs.msg import RawData
 
@@ -28,10 +32,123 @@ from pathlib import Path
 
 from std_srvs.srv import Trigger, TriggerRequest, TriggerResponse
 from std_msgs.msg import String
+import rospkg
 
-CONFIG_FILENAME = (
-    Path(__file__).parents[4] / "share" / "sgdrf_controller" / "state_machine.yaml"
-)
+CONFIG = """
+states:
+  - controller_off
+  - idle
+  - error
+  - sample_standard
+  - debubble_standard
+  - sample_adaptive
+  - debubble_adaptive
+  - beads_sequence_debubble
+  - beads_sequence_beads
+  - beads_sequence_biocide
+  - beads_sequence_bleach
+  - cartridge_debubble
+transitions:
+  - trigger: begin_debubble_adaptive
+    source:
+      - sample_adaptive
+      - idle
+      - sample_standard
+    dest: debubble_adaptive
+    conditions:
+      - is_moving
+      - is_going_south
+      - is_ifcb_idle
+      - can_acquire_better_sample
+      - is_not_manually_idled
+  - trigger: begin_sample_adaptive
+    source:
+      - debubble_standard
+      - debubble_adaptive
+    dest: sample_adaptive
+    conditions:
+      - is_ifcb_idle
+      - is_moving
+      - is_going_south
+  - trigger: begin_debubble_standard
+    source:
+      - sample_standard
+      - idle
+      - sample_adaptive
+    conditions:
+      - is_ifcb_idle
+      - is_moving
+      - is_going_north
+      - is_not_manually_idled
+    dest: debubble_standard
+  - trigger: begin_sample_standard
+    source: 
+      - debubble_standard
+      - debubble_adaptive
+    dest: sample_standard
+    conditions:
+      - is_ifcb_idle
+      - is_moving
+      - is_going_north
+  - trigger: to_error
+    source: "*"
+    dest: error
+  - trigger: begin_idling
+    source: "*"
+    dest: idle
+  - trigger: turn_off
+    source: "*"
+    dest: controller_off
+  - trigger: turn_on
+    source: controller_off
+    dest: idle
+  - trigger: run_beads_sequence_debubble
+    source:
+      - idle
+      - sample_standard
+      - sample_adaptive
+    dest: beads_sequence_debubble
+    conditions:
+      - is_ifcb_idle
+      - is_it_time_to_run_beads
+      - is_not_manually_idled
+  - trigger: run_beads_sequence_beads
+    source: beads_sequence_debubble
+    dest: beads_sequence_beads
+    conditions:
+      - is_ifcb_idle
+  - trigger: run_beads_sequence_biocide
+    source: beads_sequence_beads
+    dest: beads_sequence_biocide
+    conditions:
+      - is_ifcb_idle
+  - trigger: run_beads_sequence_bleach
+    source: beads_sequence_biocide
+    dest: beads_sequence_bleach
+    conditions:
+      - is_ifcb_idle
+  - trigger: finish_beads_sequence_bleach
+    source: beads_sequence_bleach
+    dest: idle
+    conditions:
+      - is_ifcb_idle
+  - trigger: run_cartridge_debubble
+    source:
+      - idle
+      - sample_standard
+      - sample_adaptive
+    dest: cartridge_debubble
+    conditions:
+      - is_ifcb_idle
+      - is_it_time_to_run_cartridge_debubble
+      - is_not_manually_idled
+  - trigger: finish_cartridge_debubble
+    source: cartridge_debubble
+    dest: idle
+    conditions:
+      - is_ifcb_idle
+
+"""
 
 RADIANS_PER_DEGREE = np.pi / 180
 
@@ -39,13 +156,13 @@ RADIANS_PER_DEGREE = np.pi / 180
 def log_ros(log_func: Callable = rospy.logdebug) -> Callable:
     def wrapper(func: Callable[[EventData], None]) -> Callable[[EventData], None]:
         def inner(_, event: EventData):
-            if event.event:
-                log_str = f"triggered event '{event.event.name}'"
-                if event.transition:
-                    log_str += f"from state '{event.transition.source}' to state '{event.transition.dest}'"
-                else:
-                    log_str += f"in state '{event.state.name}'"
-                log_func(log_str)
+            # if event and event.event:
+            #     log_str = f"triggered event '{event.event.name}'"
+            #     if event.transition:
+            #         log_str += f"from state '{event.transition.source}' to state '{event.transition.dest}'"
+            #     else:
+            #         log_str += f"in state '{event.state.name}'"
+            #     log_func(log_str)
             return func(_, event)
 
         return inner
@@ -56,8 +173,7 @@ def log_ros(log_func: Callable = rospy.logdebug) -> Callable:
 class Controller:
     def __init__(self) -> None:
         self.lock = RLock()
-        with open(CONFIG_FILENAME, "r") as f:
-            config = load(f, Loader=Loader)
+        config = load(CONFIG, Loader=Loader)
         self.all_states = config["states"]
         self.all_transitions = config["transitions"]
         nonautonomous_triggers = {"to_error", "begin_idling", "turn_on", "turn_off"}
@@ -79,29 +195,19 @@ class Controller:
         self.gps_fix_sub = None
         self.on_ifcb_msg_sub = None
         self.set_state_pub = None
+        self.controller_status_pub = None
         self.last_cart_debub_time = None
         self.last_bead_time = None
         self.ifcb_is_idle = Event()
         self.manually_idled = Event()
+        self.manually_idled.set()
         self.loop_timer = None
         self.lat = 0.0
         self.lon = 0.0
+        self.track = 0.0
+        self.speed = 0.0
         self.max_lat = rospy.get_param("max_lat", 180)
         self.min_lat = rospy.get_param("min_lat", -180)
-
-        # self.filter = filterpy.kalman.UnscentedKalmanFilter(
-        #     dim_x=6,
-        #     dim_z=4,
-        #     dt=1,
-        #     hx=self.kalman_hx,
-        #     fx=self.kalman_fx,
-        #     points=filterpy.kalman.MerweScaledSigmaPoints(
-        #         4, alpha=0.1, beta=2.0, kappa=-1
-        #     ),
-        #     z_mean_fn=self.kalman_z_mean_fn,
-        #     residual_z=self.kalman_residual_z,
-        # )
-        # self.filter_initialized = False
 
         self.bead_interval = rospy.Duration(60 * rospy.get_param("bead_interval", 120))
         self.cart_debub_interval = rospy.Duration(
@@ -126,73 +232,11 @@ class Controller:
         self.stop_idling_service = None
         self.reset_clean_times_service = None
 
-    @staticmethod
-    def kalman_hx(x: np.array) -> np.array:
-        z = np.zeros_like(x, shape=(4,))
-        z[0] = x[0]
-        z[1] = x[3]
-        z[2] = (90 - np.arctan2(x[3], x[0]) / RADIANS_PER_DEGREE) % 360
-        z[3] = np.sqrt(x[1] ** 2 + x[4] ** 2)
-
-    @staticmethod
-    def kalman_fx(x: np.array, dt: float) -> np.array:
-        m = np.array(
-            [
-                [1, dt, 0, 0, 0, 0],
-                [0, 1, dt, 0, 0, 0],
-                [0, 0, 1, 0, 0, 0],
-                [0, 0, 0, 1, dt, 0],
-                [0, 0, 0, 0, 1, dt],
-                [0, 0, 0, 0, 0, 1],
-            ],
-            dtype=float,
-        )
-        return np.dot(m, x)
-
-    @staticmethod
-    def kalman_z_mean_fn(sigmas: np.array, wm: np.array) -> np.array:
-        z = np.zeros(4)
-        sum_sin, sum_cos = 0.0, 0.0
-
-        for i in range(len(sigmas)):
-            s = sigmas[i]
-            z[0] += s[0] * wm[i]
-            z[1] += s[1] * wm[i]
-            z[3] += s[3] * wm[i]
-            sum_sin += np.sin(s[2] * RADIANS_PER_DEGREE) * wm[i]
-            sum_cos += np.cos(s[2] * RADIANS_PER_DEGREE) * wm[i]
-        z[2] = np.arctan2(sum_sin, sum_cos)
-        return z
-
-    @staticmethod
-    def kalman_residual_z(x: np.array, y: np.array) -> np.array:
-        ret = x - y
-        ret[2] = (x[2] - y[2]) % 360
-        return ret
-
-    @staticmethod
-    def kalman_residual_z(x: np.array, y: np.array) -> np.array:
-        ret = x - y
-        ret[2] = (x[2] - y[2]) % 360
-        return ret
-
-    def initialize_filter(self, msg: GPSFix):
-        self.filter.x = self.msg_to_x(msg)
-        self.filter.Q = filterpy.common.Q_discrete_white_noise(
-            dim=2, dt=1.0, var=1.0, block_size=2
-        )
-        self.filter.predict()
-        self.filter_initialized = True
-
     def gpsfix_callback(self, msg: GPSFix):
         self.lat = msg.latitude
         self.lon = msg.longitude
         self.track = msg.track
         self.speed = msg.speed
-        # if self.filter_initialized:
-        #     self.filter.update(self.msg_to_z(msg))
-        # else:
-        #     self.initialize_filter(msg)
 
     def setup_pub_sub_srv(self):
         self.ifcb_run_routine = rospy.ServiceProxy("/ifcb/routine", RunRoutine)
@@ -219,6 +263,9 @@ class Controller:
         )
         self.reset_clean_times_service = rospy.Service(
             "/sgdrf/reset_clean_times", Trigger, self.reset_clean_times_service_provider
+        )
+        self.controller_status_pub = rospy.Publisher(
+            "~controller_status", ControllerStatus, queue_size=1
         )
 
     def set_state(self, s: ConductorStates):
@@ -251,38 +298,13 @@ class Controller:
         if marker is None:
             return
 
-    @staticmethod
-    def msg_to_z(msg: GPSFix) -> np.array:
-        lat = msg.latitude
-        lon = msg.longitude
-        track = msg.track
-        speed = msg.speed
-
-        easting, northing, _, _ = utm.from_latlon(lat, lon)
-
-        return np.array([easting, northing, track, speed])
-
-    @staticmethod
-    def msg_to_x(msg: GPSFix) -> np.array:
-        lat = msg.latitude
-        lon = msg.longitude
-        track = msg.track
-        speed = msg.speed
-        easting, northing, _, _ = utm.from_latlon(lat, lon)
-        vy = speed * np.cos(track * RADIANS_PER_DEGREE)
-        vx = np.sqrt(speed**2 - vy**2)
-        # No acceleration measurements, so these are set to 0
-        return np.array([easting, vx, 0, northing, vy, 0.0])
-
     def init_node(self):
         rospy.init_node("sgdrf_conductor", anonymous=True, log_level=rospy.DEBUG)
-
         self.machine_setup_state_callbacks()
         self.setup_pub_sub_srv()
 
         # Initialize service proxy for sending routines to the IFCB
         self.ifcb_run_routine.wait_for_service()
-
         # Set a fake timestamp for having run beads and catridge debubble, so that
         # we don't run it every startup and potentially waste time or bead supply.
         self.last_cart_debub_time = rospy.Time.now()
@@ -298,108 +320,61 @@ class Controller:
                     else self.empty_callback
                 )
 
-    @log_ros()
     def on_enter_controller_off(self, _: EventData):
         rospy.loginfo("Turning controller off.")
 
-    @log_ros()
     def on_exit_controller_off(self, _: EventData):
         rospy.loginfo("Turning controller on.")
 
-    @log_ros()
     def on_enter_idle(self, _: EventData):
         rospy.loginfo("Idling.")
 
-    @log_ros()
     def on_enter_error(self, event: EventData):
         error_info = event.kwargs.get("error_info", "none provided")
         rospy.logerr(f"Entered error state. Error: {error_info}")
 
-    @log_ros()
     def on_exit_error(self, _: EventData):
         rospy.loginfo("Clearing error state.")
 
     def run_routine_callback(self, routine: str):
-        @log_ros()
-        def callback(self, _: EventData):
+        def callback(_: EventData):
+            if routine == "cartridgedebubble":
+                self.last_cart_debub_time = rospy.Time.now()
+            elif routine == "beads":
+                self.last_bead_time = rospy.Time.now()
             self.ifcb_is_idle.clear()
             self.ifcb_run_routine(routine=routine, instrument=True)
 
         return callback
 
-    @log_ros()
     def on_enter_sample_adaptive(self, _: EventData):
         # TODO
         self.ifcb_is_idle.clear()
         self.ifcb_run_routine(routine="runsample", instrument=True)
         pass
 
-    @log_ros()
-    def on_enter_at_top(self, _: EventData):
-        pass
-
-    @log_ros()
-    def on_enter_turning_to_go_south(self, _: EventData):
-        pass
-
-    @log_ros()
-    def on_enter_ready_to_go_south(self, _: EventData):
-        pass
-
-    @log_ros()
-    def on_enter_at_bottom(self, _: EventData):
-        pass
-
-    @log_ros()
-    def on_enter_turning_to_go_north(self, _: EventData):
-        pass
-
-    @log_ros()
-    def on_enter_ready_to_go_north(self, _: EventData):
-        pass
-
-    @log_ros(rospy.logerr)
     def on_exception(self, _: EventData):
         pass
 
-    @log_ros()
-    def is_ifcb_idle_or_can_acquire_better_sample(self, event: EventData) -> bool:
-        return self.is_ifcb_idle(event) or self.can_acquire_better_sample(event)
-
-    @log_ros()
     def can_acquire_better_sample(self, _: EventData) -> bool:
         # TODO
-        return False
+        return True
 
-    @log_ros()
     def is_ifcb_idle(self, _: EventData) -> bool:
         return self.ifcb_is_idle.is_set()
 
-    @log_ros()
-    def is_at_top(self, _: EventData) -> bool:
-        return np.isclose(self.lat, self.max_lat)
-
-    @log_ros()
-    def is_at_bottom(self, _: EventData) -> bool:
-        return np.isclose(self.lat, self.min_lat)
-
-    @log_ros()
     def is_stopped(self, _: EventData):
         return self.speed < 0.1
 
-    @log_ros()
     def is_moving(self, _: EventData):
         return self.speed > 1.0
 
-    @log_ros()
     def is_going_north(self, _: EventData) -> bool:
-        return np.isclose(self.track, 0) or np.isclose(self.track, 360)
+        return (-45 < self.track < 45) or (315 < self.track < 405)
 
-    @log_ros()
     def is_going_south(self, _: EventData) -> bool:
-        return np.isclose(self.track, 180)
+        return 135 < self.track < 225
 
-    @log_ros()
     def is_it_time_to_run_beads(self, _: EventData) -> bool:
         run_beads = not np.isclose(self.bead_interval.to_sec(), 0.0)
         enough_time_passed = (
@@ -407,13 +382,18 @@ class Controller:
         ) > self.bead_interval
         return run_beads and enough_time_passed
 
-    @log_ros()
     def is_it_time_to_run_cartridge_debubble(self, _: EventData) -> bool:
         run_cart_debub = not np.isclose(self.cart_debub_interval.to_sec(), 0.0)
         enough_time_passed = (
             rospy.Time.now() - self.last_cart_debub_time
         ) > self.cart_debub_interval
         return run_cart_debub and enough_time_passed
+
+    def is_manually_idled(self, _: EventData) -> bool:
+        return self.manually_idled.is_set()
+
+    def is_not_manually_idled(self, _: EventData) -> bool:
+        return not self.manually_idled.is_set()
 
     def turn_off_service_provider(self, _: TriggerRequest) -> TriggerResponse:
         try:
@@ -477,13 +457,40 @@ class Controller:
             # rospy.logdebug(f"checking trigger '{t}'...")
             if self.__getattribute__(f"may_{t}")():
                 rospy.logdebug(f"can execute trigger '{t}'. executing...")
-                self.__getattribute__(t)()
+                self.trigger(t)
                 rospy.logdebug(f"trigger '{t}' executed.")
                 break
             else:
                 # rospy.logdebug(f"cannot execute trigger '{t}'.")
                 pass
+        self.publish_controller_status()
 
-    @log_ros()
+    def publish_controller_status(self):
+        state = getattr(ControllerState, self.state.upper())
+        header = Header()
+        header.stamp = rospy.Time.now()
+        msg = ControllerStatus(
+            header=Header(),
+            latitude=self.lat,
+            longitude=self.lon,
+            track=self.track,
+            speed=self.speed,
+            last_cart_debub_time=self.last_cart_debub_time,
+            last_bead_time=self.last_bead_time,
+            state=state,
+            state_name=self.state,
+            is_manually_idled=self.is_manually_idled(None),
+            is_ifcb_idle=self.is_ifcb_idle(None),
+            is_stopped=self.is_stopped(None),
+            is_moving=self.is_moving(None),
+            is_going_north=self.is_going_north(None),
+            is_going_south=self.is_going_south(None),
+            is_it_time_to_run_beads=self.is_it_time_to_run_beads(None),
+            is_it_time_to_run_cartridge_debubble=self.is_it_time_to_run_cartridge_debubble(
+                None
+            ),
+        )
+        self.controller_status_pub.publish(msg)
+
     def empty_callback(self, _: EventData):
         pass

@@ -4,7 +4,7 @@
     <arg name="bead_interval" value="60" />
     <arg name="cartridge_debubble_interval" value="60" />
     <arg name="gps_topic_name" value="/gps_spoof/extended_fix" />
-    <node pkg="sgdrf_controller" type="node.py" name="sgdrf_controller" output="log">
+    <node pkg="sgdrf_controller" type="node.py" name="sgdrf_controller" output="screen">
         <param name="min_lat" value="$(arg min_lat)" />
         <param name="max_lat" value="$(arg max_lat)" />
         <param name="bead_interval" value="$(arg bead_interval)" />

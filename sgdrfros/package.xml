@@ -51,7 +51,6 @@
   <buildtool_depend>catkin</buildtool_depend>
   <depend>sgdrf_msgs</depend>
   <depend>sgdrf_srvs</depend>
-  <exec_depend>python-sgdrf-pip</exec_depend>
   <exec_depend>python-pytorch-pip</exec_depend>
   <exec_depend>python3-pyro-ppl-pip</exec_depend>
 

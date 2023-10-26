@@ -14,8 +14,8 @@ repositories:
     version: master
   ds_msgs:
     type: git
-    url: https://bitbucket.org/whoidsl/ds_msgs.git
-    version: master
+    url: https://github.com/san-soucie/ds_msgs
+    version: phins-fix
   ds_sensors:
     type: git
     url: https://bitbucket.org/whoidsl/ds_sensors.git

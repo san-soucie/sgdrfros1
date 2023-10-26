@@ -1,5 +1,6 @@
 FROM ros:noetic AS base
-LABEL org.opencontainers.image.source="https://github.com/san-soucie/sgdrfros1"
+LABEL org.opencontainers.image.source "https://github.com/san-soucie/sgdrfros1"
+LABEL org.opencontainers.image.description "sgdrfros1 docker image"
 # Increment DEPSCACHE when there's a known change to deps.rosinstall
 ARG DEPSCACHE=1
 SHELL ["/usr/bin/bash", "-c"]
@@ -14,7 +15,8 @@ RUN apt update \
         screen \
         git \
         && rm -rf /var/lib/apt/lists/* \
-        && python3 -m pip install --upgrade pip setuptools
+        && python3 -m pip install --upgrade pip setuptools \
+        && python3 -m pip install --upgrade grpcio[all]
 
 COPY --link ./sgdrfros/custom_deps.yaml /custom_deps.yaml
 RUN bash -c "echo yaml file://$(readlink -f /custom_deps.yaml) >> /etc/ros/rosdep/sources.list.d/20-default.list"

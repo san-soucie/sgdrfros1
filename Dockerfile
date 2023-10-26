@@ -13,7 +13,8 @@ RUN apt update \
         python3-rosdep \
         screen \
         git \
-        && rm -rf /var/lib/apt/lists/*
+        && rm -rf /var/lib/apt/lists/* \
+        && python3 -m pip install --upgrade pip setuptools
 
 COPY --link ./sgdrfros/custom_deps.yaml /custom_deps.yaml
 RUN bash -c "echo yaml file://$(readlink -f /custom_deps.yaml) >> /etc/ros/rosdep/sources.list.d/20-default.list"

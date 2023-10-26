@@ -10,7 +10,7 @@ jobs:
         steps:
           - uses: ika-rwth-aachen/docker-ros@v1.3.1
             with:
-              base-image: rwthika/ros-torch:noetic-desktop-full-torch2.0.1-cpp-v23.08
+              base-image: rwthika/ros-torch:noetic-desktop-full-torch2.0.1-py-v23.08
               command: roslaunch sgdrfros sgdrfros.launch
               platform: amd64,arm64
               enable-singlearch-push: true

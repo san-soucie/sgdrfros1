@@ -1,0 +1,3 @@
+[submodule "ifcb_triton_glue_ros"]
+	path = ifcb_triton_glue_ros
+	url = https://github.com/san-soucie/ifcb_triton_glue_ros.git

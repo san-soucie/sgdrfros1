@@ -51,8 +51,7 @@ transitions:
     conditions:
       - is_moving
       - is_going_south
-      - is_ifcb_idle
-      - can_acquire_better_sample
+      - is_ifcb_idle_or_can_acquire_better_sample
       - is_not_manually_idled
   - trigger: begin_sample_adaptive
     source:
@@ -355,6 +354,9 @@ class Controller:
 
     def is_ifcb_idle(self, _: EventData) -> bool:
         return self.ifcb_is_idle.is_set()
+
+    def is_ifcb_idle_or_can_acquire_better_sample(self, event: EventData) -> bool:
+        return self.is_ifcb_idle(event) or self.can_acquire_better_sample(event)
 
     def is_stopped(self, _: EventData):
         return self.speed < 0.1

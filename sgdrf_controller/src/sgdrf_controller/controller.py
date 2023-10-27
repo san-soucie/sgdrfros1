@@ -1,18 +1,14 @@
-from enum import Enum
 from transitions import EventData
 from transitions.extensions import LockedMachine
 from typing import Callable
 from threading import Event, RLock
-import inspect
 import rospy
-import filterpy.kalman
 import numpy as np
 from ifcbclient.protocol import parse_response as parse_ifcb_msg
 from ifcb.instrumentation import parse_marker as parse_ifcb_marker
 from sgdrf_controller_msgs.msg import ControllerState, ControllerStatus
 from std_msgs.msg import Header
 
-import pdb
 
 from ds_core_msgs.msg import RawData
 
@@ -20,7 +16,6 @@ from ifcb.srv import RunRoutine
 from phyto_arm.msg import ConductorState, ConductorStates
 
 from gps_common.msg import GPSFix
-import utm
 
 from yaml import load
 
@@ -28,11 +23,9 @@ try:
     from yaml import CLoader as Loader
 except ImportError:
     from yaml import Loader
-from pathlib import Path
 
 from std_srvs.srv import Trigger, TriggerRequest, TriggerResponse
-from std_msgs.msg import String
-import rospkg
+
 
 CONFIG = """
 states:

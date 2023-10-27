@@ -60,8 +60,6 @@
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
   <depend>sgdrf_controller_msgs</depend>
-  <exec_depend>python3-filterpy-pip</exec_depend>
-  <exec_depend>python-utm-pip</exec_depend>
   <exec_depend>python3-transitions</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
